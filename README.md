@@ -30,7 +30,7 @@ hf://buckets/lucifershaik/Sulphur-2-base-bucket
 Recommended keys:
 
 ```text
-sulphur_dev_fp8mixed.safetensors
+sulphur_dev_bf16.safetensors
 distill_loras/ltx-2.3-22b-distilled-lora-1.1_fro90_ceil72_condsafe.safetensors
 workflows/ltx23_t2v_api.json
 ```
@@ -98,8 +98,8 @@ Default env:
 ```text
 BUCKET_ID=lucifershaik/Sulphur-2-base-bucket
 OUTPUT_PREFIX=outputs
-CHECKPOINT_KEY=sulphur_dev_fp8mixed.safetensors
-CHECKPOINT_NAME=sulphur_dev_fp8mixed.safetensors
+CHECKPOINT_KEY=sulphur_dev_bf16.safetensors
+CHECKPOINT_NAME=sulphur_dev_bf16.safetensors
 LORA_KEY=distill_loras/ltx-2.3-22b-distilled-lora-1.1_fro90_ceil72_condsafe.safetensors
 LORA_NAME=ltx-2.3-22b-distilled-lora-1.1_fro90_ceil72_condsafe.safetensors
 WORKFLOW_KEY=workflows/ltx23_t2v_api.json
@@ -108,9 +108,19 @@ TEXT_ENCODER_KEY=split_files/text_encoders/gemma_3_12B_it_fp4_mixed.safetensors
 TEXT_ENCODER_NAME=gemma_3_12B_it_fp4_mixed.safetensors
 STARTUP_DOWNLOADS=1
 MODEL_DOWNLOAD_TIMEOUT=7200
-GENERATION_TIMEOUT=2400
+GENERATION_TIMEOUT=7200
 DEFAULT_FPS=24
 OUTPUT_VIDEO_FORMAT=video/h264-mp4
+DEFAULT_PROMPT_ENHANCE=1
+DEFAULT_PROMPT_PRESET=cinematic_ultra
+ALLOW_SHAPE_OVERRIDE=0
+DEFAULT_CAMERA_LANGUAGE=premium cinema camera, 35mm anamorphic lens, slow controlled camera movement, stable composition, intentional framing, natural parallax, no sudden zooms
+DEFAULT_LIGHTING_LANGUAGE=motivated practical lighting, soft directional key light, gentle rim light, realistic shadows, natural bounce light, balanced highlight rolloff
+DEFAULT_MOTION_LANGUAGE=slow cinematic motion, smooth subject movement, stable temporal continuity, no flicker, consistent object identity across frames
+DEFAULT_AESTHETIC_LANGUAGE=high-end cinematic commercial look, realistic live-action aesthetics, detailed materials, clean production design, elegant filmic contrast
+DEFAULT_COLOR_LANGUAGE=filmic color grade, natural skin/material tones, soft contrast, high dynamic range, subtle halation, clean blacks, restrained saturation
+CINEMATIC_PROMPT_SUFFIX=cinematic live-action footage, natural realistic motion, coherent temporal consistency, professional camera movement, shallow depth of field, detailed textures, realistic lighting, filmic color grading, soft highlights, high dynamic range, no text, no watermark
+NEGATIVE_PROMPT=low quality, blurry, jitter, flicker, warped geometry, deformed objects, bad anatomy, cartoon, game render, plastic skin, oversharpened, noisy, compression artifacts, text, watermark, logo
 ```
 
 Secret env:
@@ -156,9 +166,22 @@ Expected debug field:
 
 ```json
 {
-  "has_vhs_output": true
+  "has_vhs_output": true,
+  "quality_preset": "product_film",
+  "effective_fps": 24,
+  "effective_positive_prompt": "Primary scene command: ...",
+  "effective_negative_prompt": "low quality, ...",
+  "prompt_debug_nodes": [
+    {
+      "class_type": "PrimitiveStringMultiline"
+    }
+  ]
 }
 ```
+
+For best quality, do not send `width`, `height`, or `num_frames` unless you also
+send `"override_shape": true`. The default workflow dimensions are safer and
+more cinematic than the smoke-test 512x320 settings.
 
 Expected response:
 
@@ -186,5 +209,6 @@ which file/key is missing or which download failed.
 
 - This container downloads only the configured checkpoint, not the entire 187GB
   bucket/repo.
-- Use the FP8 checkpoint first to keep disk and VRAM requirements lower.
+- Use the BF16 checkpoint on A100 80GB for best quality. FP8 is only for
+  cheaper smoke tests.
 - Revoke any token pasted into chat or terminal screenshots.

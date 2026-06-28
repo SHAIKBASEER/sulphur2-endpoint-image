@@ -15,6 +15,74 @@ COMFYUI_URL = f"http://127.0.0.1:{COMFYUI_PORT}"
 OUTPUT_DIR = Path(os.environ.get("COMFYUI_OUTPUT_DIR", "/data/outputs"))
 COMFY_LOG_PATH = Path(os.environ.get("COMFY_LOG_PATH", "/data/comfyui.log"))
 
+DEFAULT_PROMPT_PRESET = os.environ.get("DEFAULT_PROMPT_PRESET", "cinematic_ultra").strip()
+DEFAULT_CAMERA_LANGUAGE = os.environ.get(
+    "DEFAULT_CAMERA_LANGUAGE",
+    "premium cinema camera, 35mm anamorphic lens, slow controlled camera movement, stable composition, "
+    "intentional framing, natural parallax, no sudden zooms",
+).strip()
+DEFAULT_LIGHTING_LANGUAGE = os.environ.get(
+    "DEFAULT_LIGHTING_LANGUAGE",
+    "motivated practical lighting, soft directional key light, gentle rim light, realistic shadows, "
+    "natural bounce light, balanced highlight rolloff",
+).strip()
+DEFAULT_MOTION_LANGUAGE = os.environ.get(
+    "DEFAULT_MOTION_LANGUAGE",
+    "slow cinematic motion, smooth subject movement, stable temporal continuity, no flicker, "
+    "consistent object identity across frames",
+).strip()
+DEFAULT_AESTHETIC_LANGUAGE = os.environ.get(
+    "DEFAULT_AESTHETIC_LANGUAGE",
+    "high-end cinematic commercial look, realistic live-action aesthetics, detailed materials, "
+    "clean production design, elegant filmic contrast",
+).strip()
+DEFAULT_COLOR_LANGUAGE = os.environ.get(
+    "DEFAULT_COLOR_LANGUAGE",
+    "filmic color grade, natural skin/material tones, soft contrast, high dynamic range, subtle halation, "
+    "clean blacks, restrained saturation",
+).strip()
+CINEMATIC_PROMPT_SUFFIX = os.environ.get(
+    "CINEMATIC_PROMPT_SUFFIX",
+    "cinematic live-action footage, natural realistic motion, coherent temporal consistency, "
+    "professional camera movement, shallow depth of field, detailed textures, realistic lighting, "
+    "filmic color grading, soft highlights, high dynamic range, no text, no watermark",
+).strip()
+DEFAULT_NEGATIVE_PROMPT = os.environ.get(
+    "NEGATIVE_PROMPT",
+    "low quality, blurry, jitter, flicker, warped geometry, deformed objects, bad anatomy, "
+    "cartoon, game render, plastic skin, oversharpened, noisy, compression artifacts, text, watermark, logo",
+).strip()
+DEFAULT_PROMPT_ENHANCE = os.environ.get("DEFAULT_PROMPT_ENHANCE", "1") == "1"
+ALLOW_SHAPE_OVERRIDE_BY_DEFAULT = os.environ.get("ALLOW_SHAPE_OVERRIDE", "0") == "1"
+try:
+    DEFAULT_FPS = int(os.environ.get("DEFAULT_FPS", "24"))
+except ValueError:
+    DEFAULT_FPS = 24
+
+PROMPT_PRESETS: dict[str, dict[str, str]] = {
+    "cinematic_ultra": {
+        "aesthetic": DEFAULT_AESTHETIC_LANGUAGE,
+        "camera": DEFAULT_CAMERA_LANGUAGE,
+        "lighting": DEFAULT_LIGHTING_LANGUAGE,
+        "motion": DEFAULT_MOTION_LANGUAGE,
+        "color": DEFAULT_COLOR_LANGUAGE,
+    },
+    "product_film": {
+        "aesthetic": "premium product film, luxury commercial photography, immaculate surfaces, tactile material detail",
+        "camera": "macro cinema lens, slow push-in, stable product-centered composition, shallow depth of field",
+        "lighting": "large softbox key light, elegant rim highlights, controlled reflections, clean studio bounce",
+        "motion": "minimal refined motion, smooth steam or object movement, no jitter, no sudden camera shift",
+        "color": "warm premium color grade, polished highlights, clean contrast, realistic texture response",
+    },
+    "documentary_realism": {
+        "aesthetic": "grounded live-action documentary realism, natural imperfections, believable physical detail",
+        "camera": "handheld but stabilized cinema camera, observational framing, realistic lens behavior",
+        "lighting": "available light, natural exposure, realistic shadows, location-authentic contrast",
+        "motion": "natural human-scale motion, coherent continuity, no artificial animation feel",
+        "color": "natural documentary grade, accurate tones, restrained saturation, realistic dynamic range",
+    },
+}
+
 
 class ComfyError(RuntimeError):
     pass
@@ -200,7 +268,7 @@ def _add_vhs_video_output_node(
     input_names = set(object_input_names(object_info, "VHS_VideoCombine"))
     inputs: dict[str, Any] = {"images": images_ref}
     defaults = {
-        "frame_rate": int(os.environ.get("DEFAULT_FPS", "24")),
+        "frame_rate": DEFAULT_FPS,
         "loop_count": 0,
         "filename_prefix": filename_prefix or "video/LTX_2.3_t2v",
         "format": os.environ.get("OUTPUT_VIDEO_FORMAT", "video/h264-mp4"),
@@ -324,13 +392,14 @@ def patch_workflow(prompt: dict[str, Any], text: str, params: dict[str, Any]) ->
     lora_name = os.environ.get("LORA_NAME", "").strip()
     text_encoder_name = os.environ.get("TEXT_ENCODER_NAME", "").strip()
     upscaler_name = os.environ.get("UPSCALER_NAME", "").strip()
+    positive_text = build_positive_prompt(text, params)
+    negative_text = build_negative_prompt(params)
 
-    if positive_node and positive_node in prompt:
-        _patch_node_inputs(prompt[positive_node], text, params, force_text=True)
-    else:
-        patched_text = False
-        for node in prompt.values():
-            patched_text = _patch_node_inputs(node, text, params, force_text=not patched_text) or patched_text
+    _patch_positive_prompt(prompt, positive_text, positive_node)
+    _patch_negative_prompt(prompt, negative_text)
+
+    for node in prompt.values():
+        _patch_node_inputs(node, params)
 
     for node in prompt.values():
         inputs = node.get("inputs")
@@ -355,29 +424,141 @@ def patch_workflow(prompt: dict[str, Any], text: str, params: dict[str, Any]) ->
     return prompt
 
 
-def _patch_node_inputs(node: dict[str, Any], text: str, params: dict[str, Any], force_text: bool) -> bool:
+def build_positive_prompt(text: str, params: dict[str, Any]) -> str:
+    base = str(text or "").strip()
+    enhance = params.get("enhance_prompt", DEFAULT_PROMPT_ENHANCE)
+    if isinstance(enhance, str):
+        enhance = enhance.lower() not in {"0", "false", "no", "off"}
+    if not enhance:
+        return base
+
+    preset = prompt_preset(params)
+    command_lock = string_param(
+        params,
+        "command_lock",
+        "Follow the user's scene command exactly. Preserve the requested subject, action, setting, mood, materials, and camera direction. Do not substitute a different scene.",
+    )
+    scene_detail = string_param(params, "scene_detail", "")
+    aesthetic = string_param(params, "aesthetic", preset["aesthetic"])
+    camera = string_param(params, "camera", preset["camera"])
+    lighting = string_param(params, "lighting", preset["lighting"])
+    motion = string_param(params, "motion", preset["motion"])
+    color = string_param(params, "color_grade", preset["color"])
+    lens = string_param(params, "lens", "")
+    composition = string_param(
+        params,
+        "composition",
+        "clear focal subject, layered foreground and background depth, professional framing, readable silhouette",
+    )
+    temporal = string_param(
+        params,
+        "temporal_consistency",
+        "consistent identity and geometry across frames, stable textures, smooth optical flow, no morphing, no frame-to-frame flicker",
+    )
+    technical = string_param(
+        params,
+        "technical_quality",
+        "high detail, physically plausible light, realistic depth of field, clean edges, natural motion blur, no text, no watermark",
+    )
+    suffix = string_param(params, "cinematic_suffix", CINEMATIC_PROMPT_SUFFIX)
+
+    parts = [
+        f"Primary scene command: {base}" if base else "",
+        command_lock,
+        f"Additional scene detail: {scene_detail}" if scene_detail else "",
+        f"Aesthetic: {aesthetic}",
+        f"Camera and lens: {camera}" + (f", {lens}" if lens else ""),
+        f"Lighting: {lighting}",
+        f"Motion: {motion}",
+        f"Composition: {composition}",
+        f"Color grade: {color}",
+        f"Temporal quality: {temporal}",
+        f"Technical quality: {technical}",
+        suffix,
+    ]
+    return ", ".join(unique_nonempty_parts(parts))
+
+
+def build_negative_prompt(params: dict[str, Any]) -> str:
+    base = str(params.get("negative_prompt", DEFAULT_NEGATIVE_PROMPT) or "").strip()
+    extra = str(params.get("append_negative_prompt", "") or "").strip()
+    advanced = (
+        "bad cinematography, weak composition, inconsistent lighting, unstable camera, motion jitter, temporal flicker, "
+        "object morphing, duplicated objects, melted textures, smeared details, fake CGI look, flat lighting, overexposure, "
+        "underexposure, low dynamic range, muddy colors, oversaturated colors, low resolution, compression artifacts"
+    )
+    return ", ".join(unique_nonempty_parts([base, advanced, extra]))
+
+
+def prompt_preset(params: dict[str, Any]) -> dict[str, str]:
+    name = str(params.get("quality_preset", params.get("preset", DEFAULT_PROMPT_PRESET)) or DEFAULT_PROMPT_PRESET).strip()
+    return PROMPT_PRESETS.get(name, PROMPT_PRESETS["cinematic_ultra"])
+
+
+def string_param(params: dict[str, Any], key: str, default: str) -> str:
+    value = params.get(key, default)
+    return str(value or "").strip()
+
+
+def unique_nonempty_parts(parts: list[str]) -> list[str]:
+    result: list[str] = []
+    seen: set[str] = set()
+    for part in parts:
+        cleaned = " ".join(str(part or "").replace("\n", " ").split()).strip(" ,")
+        if not cleaned:
+            continue
+        key = cleaned.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(cleaned)
+    return result
+
+
+def _patch_positive_prompt(prompt: dict[str, Any], text: str, positive_node: str) -> bool:
+    if positive_node and positive_node in prompt:
+        return _patch_text_inputs(prompt[positive_node], text)
+
+    for node in prompt.values():
+        if node.get("class_type") in {"PrimitiveString", "PrimitiveStringMultiline"}:
+            if _patch_text_inputs(node, text):
+                return True
+
+    for node in prompt.values():
+        if _node_has_text_input(node) and not _looks_like_negative_prompt_node(node):
+            if _patch_text_inputs(node, text):
+                return True
+
+    return False
+
+
+def _patch_negative_prompt(prompt: dict[str, Any], text: str) -> bool:
+    negative_node = os.environ.get("NEGATIVE_NODE_ID", "").strip()
+    if negative_node and negative_node in prompt:
+        return _patch_text_inputs(prompt[negative_node], text)
+
+    patched = False
+    for node in prompt.values():
+        if _looks_like_negative_prompt_node(node):
+            patched = _patch_text_inputs(node, text) or patched
+    return patched
+
+
+def _patch_node_inputs(node: dict[str, Any], params: dict[str, Any]) -> bool:
     inputs = node.get("inputs")
     if not isinstance(inputs, dict):
         return False
 
-    patched_text = False
-    for key in ("text", "prompt", "positive_prompt", "caption"):
-        if key in inputs and isinstance(inputs[key], str) and force_text:
-            inputs[key] = text
-            patched_text = True
-            break
-
     # Patch common generation settings only when the workflow node has that input.
     # NOTE: FPS and bit_depth are different settings. A CreateVideo node accepts
     # bit_depth values only in the 8-10 range; 24 belongs in fps/frame_rate.
-    fps_value = params.get("fps", params.get("frame_rate"))
+    fps_value = params.get("fps", params.get("frame_rate", DEFAULT_FPS))
     bit_depth_value = params.get("bit_depth")
+    allow_shape_override = params.get("override_shape", params.get("allow_shape_override", ALLOW_SHAPE_OVERRIDE_BY_DEFAULT))
+    if isinstance(allow_shape_override, str):
+        allow_shape_override = allow_shape_override.lower() in {"1", "true", "yes", "on"}
 
     replacements = {
-        "width": params.get("width"),
-        "height": params.get("height"),
-        "num_frames": params.get("num_frames", params.get("frames")),
-        "frames": params.get("num_frames", params.get("frames")),
         "seed": params.get("seed"),
         "steps": params.get("steps"),
         "cfg": params.get("cfg"),
@@ -386,6 +567,16 @@ def _patch_node_inputs(node: dict[str, Any], text: str, params: dict[str, Any], 
         "frame_rate": fps_value,
         "bit_depth": bit_depth_value,
     }
+    if allow_shape_override:
+        replacements.update(
+            {
+                "width": params.get("width"),
+                "height": params.get("height"),
+                "num_frames": params.get("num_frames", params.get("frames")),
+                "frames": params.get("num_frames", params.get("frames")),
+                "length": params.get("num_frames", params.get("frames", params.get("length"))),
+            }
+        )
     for key, value in replacements.items():
         if value is not None and key in inputs and not isinstance(inputs[key], list):
             inputs[key] = value
@@ -401,7 +592,44 @@ def _patch_node_inputs(node: dict[str, Any], text: str, params: dict[str, Any], 
         if current_bit_depth not in (8, 10):
             inputs["bit_depth"] = 8
 
-    return patched_text
+    return False
+
+
+def _patch_text_inputs(node: dict[str, Any], text: str) -> bool:
+    inputs = node.get("inputs")
+    if not isinstance(inputs, dict):
+        return False
+
+    patched = False
+    for key in ("value", "text", "prompt", "positive_prompt", "caption", "string"):
+        if key in inputs and isinstance(inputs[key], str):
+            inputs[key] = text
+            patched = True
+    return patched
+
+
+def _node_has_text_input(node: dict[str, Any]) -> bool:
+    inputs = node.get("inputs")
+    if not isinstance(inputs, dict):
+        return False
+    return any(key in inputs and isinstance(inputs[key], str) for key in ("value", "text", "prompt", "positive_prompt", "caption", "string"))
+
+
+def _looks_like_negative_prompt_node(node: dict[str, Any]) -> bool:
+    if node.get("class_type") in {"PrimitiveString", "PrimitiveStringMultiline"}:
+        return False
+    inputs = node.get("inputs")
+    if not isinstance(inputs, dict):
+        return False
+    text_values = [
+        str(value).lower()
+        for key, value in inputs.items()
+        if key in {"value", "text", "prompt", "negative_prompt", "caption", "string"} and isinstance(value, str)
+    ]
+    if not text_values:
+        return False
+    negative_markers = ("ugly", "blurry", "low quality", "cartoon", "watermark", "bad anatomy", "deformed")
+    return any(any(marker in value for marker in negative_markers) for value in text_values)
 
 
 def queue_prompt(prompt: dict[str, Any], client_id: str) -> str:

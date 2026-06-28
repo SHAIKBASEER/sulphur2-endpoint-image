@@ -11,7 +11,10 @@ from pydantic import BaseModel, Field
 from bucket_cli import BucketError, cp_from_bucket, cp_to_bucket, download_file_from_repo, download_from_repo
 from comfy_api import (
     COMFYUI_DIR,
+    DEFAULT_FPS,
     ComfyError,
+    build_negative_prompt,
+    build_positive_prompt,
     comfy_log_tail,
     current_outputs,
     load_workflow,
@@ -26,7 +29,7 @@ from comfy_api import (
 
 BUCKET_ID = os.environ.get("BUCKET_ID", "lucifershaik/Sulphur-2-base-bucket")
 OUTPUT_PREFIX = os.environ.get("OUTPUT_PREFIX", "outputs").strip("/")
-CHECKPOINT_KEY = os.environ.get("CHECKPOINT_KEY", "sulphur_dev_fp8mixed.safetensors")
+CHECKPOINT_KEY = os.environ.get("CHECKPOINT_KEY", "sulphur_dev_bf16.safetensors")
 CHECKPOINT_NAME = os.environ.get("CHECKPOINT_NAME", Path(CHECKPOINT_KEY).name)
 LORA_KEY = os.environ.get(
     "LORA_KEY",
@@ -132,6 +135,7 @@ def debug_workflow(request: GenerateRequest) -> dict[str, Any]:
         class_counts: dict[str, int] = {}
         output_like_nodes = []
         latent_debug_nodes = []
+        prompt_debug_nodes = []
         for node_id, node in workflow.items():
             class_type = str(node.get("class_type", ""))
             class_counts[class_type] = class_counts.get(class_type, 0) + 1
@@ -151,12 +155,33 @@ def debug_workflow(request: GenerateRequest) -> dict[str, Any]:
                         "inputs": node.get("inputs", {}),
                     }
                 )
+            if class_type in {"PrimitiveString", "PrimitiveStringMultiline", "CLIPTextEncode"}:
+                text_inputs = {
+                    key: value
+                    for key, value in (node.get("inputs", {}) or {}).items()
+                    if key in {"value", "text", "prompt", "negative_prompt", "caption", "string"}
+                    and isinstance(value, str)
+                }
+                if text_inputs:
+                    prompt_debug_nodes.append(
+                        {
+                            "node_id": node_id,
+                            "class_type": class_type,
+                            "inputs": text_inputs,
+                        }
+                    )
         return {
             "status": "ok",
             "node_count": len(workflow),
             "has_vhs_output": any(node["class_type"] == "VHS_VideoCombine" for node in output_like_nodes),
             "output_like_nodes": output_like_nodes,
             "latent_debug_nodes": latent_debug_nodes,
+            "prompt_debug_nodes": prompt_debug_nodes,
+            "effective_positive_prompt": build_positive_prompt(request.inputs, request.parameters),
+            "effective_negative_prompt": build_negative_prompt(request.parameters),
+            "quality_preset": request.parameters.get("quality_preset", request.parameters.get("preset", "cinematic_ultra")),
+            "effective_fps": request.parameters.get("fps", request.parameters.get("frame_rate", DEFAULT_FPS)),
+            "shape_override_enabled": bool(request.parameters.get("override_shape", request.parameters.get("allow_shape_override", False))),
             "class_counts": class_counts,
         }
     except (BucketError, ComfyError) as exc:
@@ -181,6 +206,7 @@ def generate(request: GenerateRequest) -> dict[str, Any]:
             "job_id": job_id,
             "prompt_id": prompt_id,
             "video": remote_uri,
+            "note": "For quality, shape overrides are ignored unless parameters.override_shape is true.",
         }
     except (BucketError, ComfyError) as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
