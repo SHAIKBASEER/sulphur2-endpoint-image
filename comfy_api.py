@@ -281,19 +281,51 @@ def queue_prompt(prompt: dict[str, Any], client_id: str) -> str:
     return prompt_id
 
 
+PREFERRED_OUTPUT_EXT = {".mp4", ".webm", ".gif", ".png", ".jpg", ".jpeg", ".webp"}
+
+
 def wait_for_result(prompt_id: str, before: set[Path], timeout_seconds: int = 1800) -> Path:
-    deadline = time.time() + timeout_seconds
+    # Use a timestamp too, because some ComfyUI workflows overwrite the same
+    # output filename. In that case the path is already in `before`, but the
+    # file mtime changes after this request starts.
+    started_at = time.time()
+    deadline = started_at + timeout_seconds
+    last_history_payload: dict[str, Any] | None = None
+
     while time.time() < deadline:
         history = requests.get(f"{COMFYUI_URL}/history/{urllib.parse.quote(prompt_id)}", timeout=20)
-        if history.ok and prompt_id in history.json():
-            new_files = _new_output_files(before)
-            if new_files:
-                return new_files[-1]
-            time.sleep(3)
-            new_files = _new_output_files(before)
-            if new_files:
-                return new_files[-1]
-            raise ComfyError("Prompt completed but no video/output file was found in the output directory")
+        if history.ok:
+            payload = history.json()
+            if prompt_id in payload:
+                last_history_payload = payload
+
+                # Give ComfyUI a few seconds to finish flushing video files.
+                for _ in range(6):
+                    history_files = _output_files_from_history(payload, prompt_id)
+                    if history_files:
+                        return history_files[-1]
+
+                    new_files = _new_output_files(before, since_time=started_at - 5)
+                    if new_files:
+                        return new_files[-1]
+
+                    time.sleep(3)
+                    refreshed = requests.get(
+                        f"{COMFYUI_URL}/history/{urllib.parse.quote(prompt_id)}",
+                        timeout=20,
+                    )
+                    if refreshed.ok:
+                        payload = refreshed.json()
+                        last_history_payload = payload
+
+                summary = _history_output_summary(last_history_payload, prompt_id)
+                raise ComfyError(
+                    "Prompt completed, but no video/output file could be resolved. "
+                    f"Checked OUTPUT_DIR={OUTPUT_DIR} and TEMP_DIR={COMFYUI_DIR / 'temp'}. "
+                    f"ComfyUI history outputs summary: {summary}. "
+                    "This usually means the workflow has no final Save/CreateVideo output node, "
+                    "the output node is set to preview/temp only, or the output extension is unsupported."
+                )
         time.sleep(5)
     raise ComfyError("Timed out waiting for ComfyUI generation")
 
@@ -304,8 +336,79 @@ def current_outputs() -> set[Path]:
     return {p for p in OUTPUT_DIR.rglob("*") if p.is_file()}
 
 
-def _new_output_files(before: set[Path]) -> list[Path]:
-    candidates = [p for p in current_outputs() if p not in before]
-    preferred_ext = {".mp4", ".webm", ".gif", ".png", ".jpg", ".jpeg", ".webp"}
-    candidates = [p for p in candidates if p.suffix.lower() in preferred_ext]
+def _new_output_files(before: set[Path], since_time: float | None = None) -> list[Path]:
+    candidates = []
+    for p in current_outputs():
+        if p.suffix.lower() not in PREFERRED_OUTPUT_EXT:
+            continue
+        try:
+            modified_after_start = since_time is not None and p.stat().st_mtime >= since_time
+        except FileNotFoundError:
+            continue
+        if p not in before or modified_after_start:
+            candidates.append(p)
     return sorted(candidates, key=lambda p: p.stat().st_mtime)
+
+
+def _output_files_from_history(history_payload: dict[str, Any], prompt_id: str) -> list[Path]:
+    entry = history_payload.get(prompt_id, {})
+    outputs = entry.get("outputs", {})
+    found: list[Path] = []
+
+    def walk(value: Any) -> None:
+        if isinstance(value, dict):
+            if "filename" in value and isinstance(value["filename"], str):
+                path = _comfy_file_to_path(value)
+                if path and path.exists() and path.suffix.lower() in PREFERRED_OUTPUT_EXT:
+                    found.append(path)
+            for child in value.values():
+                walk(child)
+        elif isinstance(value, list):
+            for item in value:
+                walk(item)
+
+    walk(outputs)
+    return sorted(set(found), key=lambda p: p.stat().st_mtime)
+
+
+def _comfy_file_to_path(file_info: dict[str, Any]) -> Path | None:
+    filename = file_info.get("filename")
+    if not filename:
+        return None
+
+    subfolder = str(file_info.get("subfolder") or "").strip("/")
+    file_type = str(file_info.get("type") or "output").lower()
+
+    if file_type == "temp":
+        base_dir = COMFYUI_DIR / "temp"
+    elif file_type == "input":
+        base_dir = COMFYUI_DIR / "input"
+    else:
+        base_dir = OUTPUT_DIR
+
+    return base_dir / subfolder / filename if subfolder else base_dir / filename
+
+
+def _history_output_summary(history_payload: dict[str, Any] | None, prompt_id: str) -> dict[str, Any]:
+    if not history_payload or prompt_id not in history_payload:
+        return {"prompt_id_found": False}
+
+    outputs = history_payload.get(prompt_id, {}).get("outputs", {})
+    filenames: list[str] = []
+
+    def walk(value: Any) -> None:
+        if isinstance(value, dict):
+            if "filename" in value:
+                filenames.append(str(value.get("filename")))
+            for child in value.values():
+                walk(child)
+        elif isinstance(value, list):
+            for item in value:
+                walk(item)
+
+    walk(outputs)
+    return {
+        "prompt_id_found": True,
+        "output_node_ids": list(outputs.keys()) if isinstance(outputs, dict) else [],
+        "filenames": filenames[:20],
+    }
