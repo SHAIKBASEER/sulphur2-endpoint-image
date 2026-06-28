@@ -11,7 +11,7 @@ permissions:
   packages: write
 
 env:
-  IMAGE: ghcr.io/lucifershaik/sulphur2-endpoint
+  IMAGE: ghcr.io/shaikbaseer/sulphur2-endpoint
 
 jobs:
   build:
