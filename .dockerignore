@@ -1,0 +1,13 @@
+.git
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.env
+outputs
+*.mp4
+*.safetensors
+*.ckpt
+*.pt
+*.pth
+*.gguf
