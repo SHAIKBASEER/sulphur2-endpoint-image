@@ -229,6 +229,12 @@ def _patch_node_inputs(node: dict[str, Any], text: str, params: dict[str, Any], 
             patched_text = True
             break
 
+    # Patch common generation settings only when the workflow node has that input.
+    # NOTE: FPS and bit_depth are different settings. A CreateVideo node accepts
+    # bit_depth values only in the 8-10 range; 24 belongs in fps/frame_rate.
+    fps_value = params.get("fps", params.get("frame_rate"))
+    bit_depth_value = params.get("bit_depth")
+
     replacements = {
         "width": params.get("width"),
         "height": params.get("height"),
@@ -238,10 +244,24 @@ def _patch_node_inputs(node: dict[str, Any], text: str, params: dict[str, Any], 
         "steps": params.get("steps"),
         "cfg": params.get("cfg"),
         "cfg_scale": params.get("cfg", params.get("cfg_scale")),
+        "fps": fps_value,
+        "frame_rate": fps_value,
+        "bit_depth": bit_depth_value,
     }
     for key, value in replacements.items():
         if value is not None and key in inputs and not isinstance(inputs[key], list):
             inputs[key] = value
+
+    # Safety fix for workflows exported with fps=24 accidentally stored as
+    # bit_depth=24. ComfyUI CreateVideo validation rejects bit_depth > 10.
+    if "bit_depth" in inputs and not isinstance(inputs["bit_depth"], list):
+        try:
+            current_bit_depth = int(inputs["bit_depth"])
+        except (TypeError, ValueError):
+            current_bit_depth = 8
+
+        if current_bit_depth not in (8, 10):
+            inputs["bit_depth"] = 8
 
     return patched_text
 
