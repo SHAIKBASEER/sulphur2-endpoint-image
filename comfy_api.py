@@ -87,11 +87,39 @@ def load_workflow(path: Path) -> dict[str, Any]:
 def convert_ui_workflow_to_api(workflow: dict[str, Any]) -> dict[str, Any]:
     object_info = get_object_info()
     links = workflow.get("links") or []
-    link_map: dict[int, list[Any]] = {}
+    raw_link_map: dict[int, dict[str, Any]] = {}
     for link in links:
         if isinstance(link, list) and len(link) >= 6:
             link_id, origin_id, origin_slot = link[0], link[1], link[2]
-            link_map[int(link_id)] = [str(origin_id), int(origin_slot)]
+            raw_link_map[int(link_id)] = {
+                "origin_id": origin_id,
+                "origin_slot": origin_slot,
+                "target_id": link[3],
+                "target_slot": link[4],
+                "type": link[5],
+            }
+
+    nodes_by_id = {str(node.get("id")): node for node in workflow.get("nodes") or []}
+
+    def resolve_link_origin(link_id: int, seen: set[int] | None = None) -> list[Any]:
+        seen = seen or set()
+        if link_id in seen:
+            raise ComfyError(f"Reroute cycle detected while resolving link {link_id}")
+        seen.add(link_id)
+
+        link = raw_link_map[int(link_id)]
+        origin_id = str(link["origin_id"])
+        origin_slot = int(link["origin_slot"])
+        origin_node = nodes_by_id.get(origin_id, {})
+
+        if origin_node.get("type") == "Reroute":
+            for node_input in origin_node.get("inputs") or []:
+                upstream_link = node_input.get("link")
+                if upstream_link is not None:
+                    return resolve_link_origin(int(upstream_link), seen)
+            raise ComfyError(f"Reroute node {origin_id} has no upstream input")
+
+        return [origin_id, origin_slot]
 
     prompt: dict[str, Any] = {}
     for node in workflow.get("nodes") or []:
@@ -99,14 +127,18 @@ def convert_ui_workflow_to_api(workflow: dict[str, Any]) -> dict[str, Any]:
         class_type = node.get("type")
         if not node_id or not class_type:
             continue
+        if class_type in {"Reroute", "Note"}:
+            continue
+        if class_type not in object_info:
+            continue
 
         inputs: dict[str, Any] = {}
         linked_names: set[str] = set()
         for node_input in node.get("inputs") or []:
             link_id = node_input.get("link")
             name = node_input.get("name")
-            if link_id is not None and name and int(link_id) in link_map:
-                inputs[name] = link_map[int(link_id)]
+            if link_id is not None and name and int(link_id) in raw_link_map:
+                inputs[name] = resolve_link_origin(int(link_id))
                 linked_names.add(name)
 
         widget_values = list(node.get("widgets_values") or [])
