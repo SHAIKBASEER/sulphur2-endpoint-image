@@ -66,15 +66,79 @@ def load_workflow(path: Path) -> dict[str, Any]:
     if all(isinstance(v, dict) and "class_type" in v for v in workflow.values()):
         return workflow
 
-    raise ComfyError(
-        "Workflow is not in ComfyUI API format. In ComfyUI, enable dev mode and "
-        "export with 'Save (API Format)', then upload that JSON to the bucket."
-    )
+    if "nodes" in workflow and "links" in workflow:
+        return convert_ui_workflow_to_api(workflow)
+
+    raise ComfyError("Workflow is neither ComfyUI API format nor ComfyUI UI workflow format")
+
+
+def convert_ui_workflow_to_api(workflow: dict[str, Any]) -> dict[str, Any]:
+    object_info = get_object_info()
+    links = workflow.get("links") or []
+    link_map: dict[int, list[Any]] = {}
+    for link in links:
+        if isinstance(link, list) and len(link) >= 6:
+            link_id, origin_id, origin_slot = link[0], link[1], link[2]
+            link_map[int(link_id)] = [str(origin_id), int(origin_slot)]
+
+    prompt: dict[str, Any] = {}
+    for node in workflow.get("nodes") or []:
+        node_id = str(node.get("id"))
+        class_type = node.get("type")
+        if not node_id or not class_type:
+            continue
+
+        inputs: dict[str, Any] = {}
+        linked_names: set[str] = set()
+        for node_input in node.get("inputs") or []:
+            link_id = node_input.get("link")
+            name = node_input.get("name")
+            if link_id is not None and name and int(link_id) in link_map:
+                inputs[name] = link_map[int(link_id)]
+                linked_names.add(name)
+
+        widget_values = list(node.get("widgets_values") or [])
+        widget_index = 0
+        for input_name in object_input_names(object_info, class_type):
+            if input_name in linked_names or input_name in inputs:
+                continue
+            if widget_index < len(widget_values):
+                inputs[input_name] = widget_values[widget_index]
+                widget_index += 1
+
+        prompt[node_id] = {
+            "class_type": class_type,
+            "inputs": inputs,
+        }
+
+    if not prompt:
+        raise ComfyError("Converted UI workflow is empty")
+    return prompt
+
+
+def get_object_info() -> dict[str, Any]:
+    response = requests.get(f"{COMFYUI_URL}/object_info", timeout=60)
+    if not response.ok:
+        raise ComfyError(f"Could not fetch ComfyUI object_info: {response.status_code} {response.text[:1000]}")
+    return response.json()
+
+
+def object_input_names(object_info: dict[str, Any], class_type: str) -> list[str]:
+    info = object_info.get(class_type, {})
+    input_info = info.get("input", {})
+    names: list[str] = []
+    for group_name in ("required", "optional"):
+        group = input_info.get(group_name, {})
+        if isinstance(group, dict):
+            names.extend(group.keys())
+    return names
 
 
 def patch_workflow(prompt: dict[str, Any], text: str, params: dict[str, Any]) -> dict[str, Any]:
     prompt = json.loads(json.dumps(prompt))
     positive_node = os.environ.get("PROMPT_NODE_ID", "").strip()
+    checkpoint_name = os.environ.get("CHECKPOINT_NAME", "").strip()
+    lora_name = os.environ.get("LORA_NAME", "").strip()
 
     if positive_node and positive_node in prompt:
         _patch_node_inputs(prompt[positive_node], text, params, force_text=True)
@@ -82,6 +146,17 @@ def patch_workflow(prompt: dict[str, Any], text: str, params: dict[str, Any]) ->
         patched_text = False
         for node in prompt.values():
             patched_text = _patch_node_inputs(node, text, params, force_text=not patched_text) or patched_text
+
+    for node in prompt.values():
+        inputs = node.get("inputs")
+        if not isinstance(inputs, dict):
+            continue
+        for key in ("ckpt_name", "checkpoint_name"):
+            if checkpoint_name and key in inputs and isinstance(inputs[key], str):
+                inputs[key] = checkpoint_name
+        for key in ("lora_name", "loras"):
+            if lora_name and key in inputs and isinstance(inputs[key], str):
+                inputs[key] = lora_name
 
     return prompt
 
