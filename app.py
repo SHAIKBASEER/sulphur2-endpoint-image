@@ -12,6 +12,7 @@ from bucket_cli import BucketError, cp_from_bucket, cp_to_bucket
 from comfy_api import (
     COMFYUI_DIR,
     ComfyError,
+    comfy_log_tail,
     current_outputs,
     load_workflow,
     patch_workflow,
@@ -69,6 +70,11 @@ def health() -> dict[str, Any]:
     return {"status": "ok", "startup_error": _startup_error}
 
 
+@app.get("/health")
+def health_check() -> dict[str, Any]:
+    return {"status": "ok", "startup_error": _startup_error}
+
+
 @app.get("/status")
 def status() -> dict[str, Any]:
     return {
@@ -81,6 +87,9 @@ def status() -> dict[str, Any]:
         "workflow_exists": WORKFLOW_PATH.exists(),
         "checkpoint_exists": CHECKPOINT_PATH.exists(),
         "lora_exists": LORA_PATH.exists(),
+        "comfy_process_running": _comfy_process is not None and _comfy_process.poll() is None,
+        "comfy_process_returncode": None if _comfy_process is None else _comfy_process.poll(),
+        "comfy_log_tail": comfy_log_tail(),
     }
 
 
