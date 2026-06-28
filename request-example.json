@@ -1,17 +1,23 @@
 {
-  "inputs": "A cinematic macro shot of a ceramic coffee cup on a rustic wooden table at sunrise, soft window light, visible steam rising slowly, shallow depth of field, realistic reflections, detailed ceramic texture, smooth slow camera push-in, calm elegant mood",
+  "inputs": "A premium cinematic opening shot for a luxury coffee film: a clean white ceramic coffee cup rests on a rustic wooden table beside a large morning window, thin translucent steam rising slowly as the camera performs a smooth controlled push-in, natural soft daylight revealing realistic ceramic texture and warm wood grain.",
   "parameters": {
-    "quality_preset": "product_film",
+    "quality_preset": "cinematic_storyboard_pro",
+    "story_context": "Five-minute premium coffee film about the quiet ritual of morning, from origin and craft to the first sip. Each clip should feel like part of the same elegant, natural, high-end commercial.",
+    "scene_goal": "Establish the hero object, mood, lighting language, and premium natural realism for the full film.",
+    "continuity": "Use the same clean white ceramic cup, rustic walnut table, soft neutral morning light, and calm premium commercial tone across related scenes.",
     "seed": 12345,
     "cfg": 3.5,
     "fps": 24,
     "bit_depth": 8,
     "enhance_prompt": true,
-    "camera": "premium cinema camera, 35mm anamorphic macro lens, slow dolly push-in, stable product-centered composition, subtle parallax",
-    "lighting": "warm sunrise window light, soft directional key light, gentle rim light on steam, realistic shadows, controlled reflections on ceramic",
-    "motion": "steam rises slowly and naturally, camera moves forward smoothly, cup remains physically stable, no jitter, no sudden changes",
-    "composition": "close macro framing, cup as clear focal subject, rustic tabletop texture visible, softly blurred background, elegant negative space",
-    "color_grade": "warm filmic color grade, soft highlight rolloff, natural contrast, realistic ceramic whites, rich wood tones",
-    "negative_prompt": "low quality, blurry, jitter, flicker, warped cup, deformed handle, extra cups, melting ceramic, unstable steam, bad reflections, cartoon, game render, CGI plastic look, text, watermark, logo"
+    "camera": "ARRI Alexa style cinema camera, 50mm macro lens, slow dolly push-in, stable product-centered composition, subtle natural parallax, no sudden zoom",
+    "lighting": "soft neutral morning window light, controlled highlights, gentle rim light on thin steam, realistic shadows, clean reflections on ceramic, no blown-out orange backlight",
+    "motion": "thin steam rises slowly and naturally, camera moves forward smoothly, cup remains physically stable and solid, no jitter, no sudden shape changes",
+    "composition": "close macro framing, cup as clear focal subject, rustic tabletop texture visible, softly blurred background, clean elegant negative space, uncluttered scene",
+    "color_grade": "balanced neutral-warm filmic color grade, accurate white balance, soft highlight rolloff, natural contrast, realistic white ceramic, rich but restrained wood tones",
+    "realism_guardrails": "photoreal live-action product footage, clean ceramic material, accurate scale, no surreal particles, no dirt spots, no color wash, no stylized CGI",
+    "physical_accuracy": "steam is transparent and wispy, cup stays solid with a normal handle, table and background stay stable, reflections remain physically plausible",
+    "audio": "soft room tone, gentle morning ambience, faint ceramic contact, quiet premium commercial atmosphere",
+    "negative_prompt": "low quality, blurry, jitter, flicker, warped cup, deformed handle, extra cups, melting ceramic, dirty cup, stains, floating specks, confetti, random particles, orange color cast, yellow wash, overexposed background, unstable steam blob, bad reflections, cartoon, game render, CGI plastic look, text, watermark, logo"
   }
 }

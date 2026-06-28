@@ -12,6 +12,7 @@ from bucket_cli import BucketError, cp_from_bucket, cp_to_bucket, download_file_
 from comfy_api import (
     COMFYUI_DIR,
     DEFAULT_FPS,
+    DEFAULT_OUTPUT_CRF,
     ComfyError,
     build_negative_prompt,
     build_positive_prompt,
@@ -181,6 +182,7 @@ def debug_workflow(request: GenerateRequest) -> dict[str, Any]:
             "effective_negative_prompt": build_negative_prompt(request.parameters),
             "quality_preset": request.parameters.get("quality_preset", request.parameters.get("preset", "cinematic_ultra")),
             "effective_fps": request.parameters.get("fps", request.parameters.get("frame_rate", DEFAULT_FPS)),
+            "effective_output_crf": DEFAULT_OUTPUT_CRF,
             "shape_override_enabled": bool(request.parameters.get("override_shape", request.parameters.get("allow_shape_override", False))),
             "class_counts": class_counts,
         }

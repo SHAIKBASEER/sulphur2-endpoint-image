@@ -111,16 +111,20 @@ MODEL_DOWNLOAD_TIMEOUT=7200
 GENERATION_TIMEOUT=7200
 DEFAULT_FPS=24
 OUTPUT_VIDEO_FORMAT=video/h264-mp4
+OUTPUT_CRF=16
+OUTPUT_PIX_FMT=yuv420p
 DEFAULT_PROMPT_ENHANCE=1
-DEFAULT_PROMPT_PRESET=cinematic_ultra
+DEFAULT_PROMPT_PRESET=cinematic_storyboard_pro
 ALLOW_SHAPE_OVERRIDE=0
 DEFAULT_CAMERA_LANGUAGE=premium cinema camera, 35mm anamorphic lens, slow controlled camera movement, stable composition, intentional framing, natural parallax, no sudden zooms
 DEFAULT_LIGHTING_LANGUAGE=motivated practical lighting, soft directional key light, gentle rim light, realistic shadows, natural bounce light, balanced highlight rolloff
 DEFAULT_MOTION_LANGUAGE=slow cinematic motion, smooth subject movement, stable temporal continuity, no flicker, consistent object identity across frames
 DEFAULT_AESTHETIC_LANGUAGE=high-end cinematic commercial look, realistic live-action aesthetics, detailed materials, clean production design, elegant filmic contrast
 DEFAULT_COLOR_LANGUAGE=filmic color grade, natural skin/material tones, soft contrast, high dynamic range, subtle halation, clean blacks, restrained saturation
-CINEMATIC_PROMPT_SUFFIX=cinematic live-action footage, natural realistic motion, coherent temporal consistency, professional camera movement, shallow depth of field, detailed textures, realistic lighting, filmic color grading, soft highlights, high dynamic range, no text, no watermark
-NEGATIVE_PROMPT=low quality, blurry, jitter, flicker, warped geometry, deformed objects, bad anatomy, cartoon, game render, plastic skin, oversharpened, noisy, compression artifacts, text, watermark, logo
+DEFAULT_REALISM_GUARDRAILS=photoreal live-action image formation, balanced exposure, accurate white balance, clean material boundaries, physically plausible scale and reflections, no surreal particles, no color wash
+DEFAULT_PHYSICAL_ACCURACY=steam stays translucent and wispy, objects remain solid and stable, liquid and reflections behave naturally, background stays softly defocused without melting into the subject
+CINEMATIC_PROMPT_SUFFIX=cinematic live-action footage, natural realistic motion, coherent temporal consistency, professional camera movement, shallow depth of field, detailed textures, realistic lighting, balanced filmic color grading, soft highlights, high dynamic range, clean lens rendering
+NEGATIVE_PROMPT=low quality, blurry, jitter, flicker, warped geometry, deformed objects, bad anatomy, cartoon, game render, plastic skin, oversharpened, noisy, compression artifacts, text, watermark, logo, orange color cast, yellow wash, floating specks, confetti, dirt spots, melted surfaces
 ```
 
 Secret env:
@@ -169,6 +173,7 @@ Expected debug field:
   "has_vhs_output": true,
   "quality_preset": "product_film",
   "effective_fps": 24,
+  "effective_output_crf": 16,
   "effective_positive_prompt": "Primary scene command: ...",
   "effective_negative_prompt": "low quality, ...",
   "prompt_debug_nodes": [
@@ -182,6 +187,36 @@ Expected debug field:
 For best quality, do not send `width`, `height`, or `num_frames` unless you also
 send `"override_shape": true`. The default workflow dimensions are safer and
 more cinematic than the smoke-test 512x320 settings.
+
+## Five Minute Pro-Style Content
+
+Do not generate a 5 minute film in one request. Generate controlled 10 second
+shots, reject weak shots, then stitch the approved clips.
+
+Recommended structure:
+
+```text
+5 minutes = 30 clips x 10 seconds
+quality_preset=cinematic_storyboard_pro
+resolution=workflow native, then upscale/stitch in editing
+```
+
+This project includes a ready storyboard prompt pack:
+
+```text
+outputs/five-minute-cinematic-storyboard-pro.json
+outputs/run-five-minute-storyboard.ps1
+```
+
+Run the scenes from PowerShell:
+
+```powershell
+$env:HF_TOKEN="YOUR_ENDPOINT_TOKEN"
+
+powershell -ExecutionPolicy Bypass `
+  -File "C:\Users\Lucifer\Documents\Codex\2026-06-27\https-huggingface-co-sulphurai-sulphur-2\outputs\run-five-minute-storyboard.ps1" `
+  -EndpointUrl "https://YOUR-ENDPOINT.us-east-1.aws.endpoints.huggingface.cloud"
+```
 
 Expected response:
 

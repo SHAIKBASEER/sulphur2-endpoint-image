@@ -41,16 +41,27 @@ DEFAULT_COLOR_LANGUAGE = os.environ.get(
     "filmic color grade, natural skin/material tones, soft contrast, high dynamic range, subtle halation, "
     "clean blacks, restrained saturation",
 ).strip()
+DEFAULT_REALISM_GUARDRAILS = os.environ.get(
+    "DEFAULT_REALISM_GUARDRAILS",
+    "photoreal live-action image formation, balanced exposure, accurate white balance, clean material boundaries, "
+    "physically plausible scale and reflections, no surreal particles, no color wash",
+).strip()
+DEFAULT_PHYSICAL_ACCURACY = os.environ.get(
+    "DEFAULT_PHYSICAL_ACCURACY",
+    "steam stays translucent and wispy, objects remain solid and stable, liquid and reflections behave naturally, "
+    "background stays softly defocused without melting into the subject",
+).strip()
 CINEMATIC_PROMPT_SUFFIX = os.environ.get(
     "CINEMATIC_PROMPT_SUFFIX",
-    "cinematic live-action footage, natural realistic motion, coherent temporal consistency, "
-    "professional camera movement, shallow depth of field, detailed textures, realistic lighting, "
-    "filmic color grading, soft highlights, high dynamic range, no text, no watermark",
+    "cinematic live-action footage, natural realistic motion, coherent temporal consistency, professional camera movement, "
+    "shallow depth of field, detailed textures, realistic lighting, balanced filmic color grading, soft highlights, "
+    "high dynamic range, clean lens rendering",
 ).strip()
 DEFAULT_NEGATIVE_PROMPT = os.environ.get(
     "NEGATIVE_PROMPT",
     "low quality, blurry, jitter, flicker, warped geometry, deformed objects, bad anatomy, "
-    "cartoon, game render, plastic skin, oversharpened, noisy, compression artifacts, text, watermark, logo",
+    "cartoon, game render, plastic skin, oversharpened, noisy, compression artifacts, text, watermark, logo, "
+    "orange color cast, yellow wash, floating specks, confetti, dirt spots, melted surfaces",
 ).strip()
 DEFAULT_PROMPT_ENHANCE = os.environ.get("DEFAULT_PROMPT_ENHANCE", "1") == "1"
 ALLOW_SHAPE_OVERRIDE_BY_DEFAULT = os.environ.get("ALLOW_SHAPE_OVERRIDE", "0") == "1"
@@ -58,6 +69,10 @@ try:
     DEFAULT_FPS = int(os.environ.get("DEFAULT_FPS", "24"))
 except ValueError:
     DEFAULT_FPS = 24
+try:
+    DEFAULT_OUTPUT_CRF = int(os.environ.get("OUTPUT_CRF", "16"))
+except ValueError:
+    DEFAULT_OUTPUT_CRF = 16
 
 PROMPT_PRESETS: dict[str, dict[str, str]] = {
     "cinematic_ultra": {
@@ -68,11 +83,11 @@ PROMPT_PRESETS: dict[str, dict[str, str]] = {
         "color": DEFAULT_COLOR_LANGUAGE,
     },
     "product_film": {
-        "aesthetic": "premium product film, luxury commercial photography, immaculate surfaces, tactile material detail",
+        "aesthetic": "premium product film, luxury commercial photography, clean ceramic surfaces, tactile material detail",
         "camera": "macro cinema lens, slow push-in, stable product-centered composition, shallow depth of field",
-        "lighting": "large softbox key light, elegant rim highlights, controlled reflections, clean studio bounce",
-        "motion": "minimal refined motion, smooth steam or object movement, no jitter, no sudden camera shift",
-        "color": "warm premium color grade, polished highlights, clean contrast, realistic texture response",
+        "lighting": "large soft directional key light, gentle rim highlights, controlled reflections, clean natural bounce, no harsh overexposure",
+        "motion": "minimal refined motion, subtle translucent steam, no jitter, no sudden camera shift, stable product silhouette",
+        "color": "neutral-warm premium color grade, accurate white balance, clean contrast, realistic ceramic whites, restrained saturation",
     },
     "documentary_realism": {
         "aesthetic": "grounded live-action documentary realism, natural imperfections, believable physical detail",
@@ -80,6 +95,13 @@ PROMPT_PRESETS: dict[str, dict[str, str]] = {
         "lighting": "available light, natural exposure, realistic shadows, location-authentic contrast",
         "motion": "natural human-scale motion, coherent continuity, no artificial animation feel",
         "color": "natural documentary grade, accurate tones, restrained saturation, realistic dynamic range",
+    },
+    "cinematic_storyboard_pro": {
+        "aesthetic": "frontier-model cinematic realism, premium commercial film craft, natural live-action texture, elegant production design, believable human-scale detail",
+        "camera": "ARRI Alexa style cinema camera, 40mm to 65mm spherical lens language, controlled dolly movement, natural parallax, stable subject tracking, intentional shot grammar",
+        "lighting": "motivated natural lighting, soft key light, practical ambience, controlled highlights, realistic bounce, accurate white balance, no artificial color wash",
+        "motion": "slow confident cinematic motion, coherent physics, stable object identity, natural human gestures, smooth temporal continuity, no frame-to-frame wobble",
+        "color": "premium neutral film grade, accurate skin and material tones, soft contrast, high dynamic range, restrained saturation, clean blacks, gentle highlight rolloff",
     },
 }
 
@@ -272,6 +294,8 @@ def _add_vhs_video_output_node(
         "loop_count": 0,
         "filename_prefix": filename_prefix or "video/LTX_2.3_t2v",
         "format": os.environ.get("OUTPUT_VIDEO_FORMAT", "video/h264-mp4"),
+        "crf": DEFAULT_OUTPUT_CRF,
+        "pix_fmt": os.environ.get("OUTPUT_PIX_FMT", "yuv420p"),
         "pingpong": False,
         "save_output": True,
     }
@@ -438,12 +462,18 @@ def build_positive_prompt(text: str, params: dict[str, Any]) -> str:
         "command_lock",
         "Follow the user's scene command exactly. Preserve the requested subject, action, setting, mood, materials, and camera direction. Do not substitute a different scene.",
     )
+    story_context = string_param(params, "story_context", "")
+    scene_goal = string_param(params, "scene_goal", "")
+    continuity = string_param(params, "continuity", "")
     scene_detail = string_param(params, "scene_detail", "")
     aesthetic = string_param(params, "aesthetic", preset["aesthetic"])
     camera = string_param(params, "camera", preset["camera"])
     lighting = string_param(params, "lighting", preset["lighting"])
     motion = string_param(params, "motion", preset["motion"])
     color = string_param(params, "color_grade", preset["color"])
+    audio = string_param(params, "audio", "")
+    realism = string_param(params, "realism_guardrails", DEFAULT_REALISM_GUARDRAILS)
+    physical_accuracy = string_param(params, "physical_accuracy", DEFAULT_PHYSICAL_ACCURACY)
     lens = string_param(params, "lens", "")
     composition = string_param(
         params,
@@ -465,6 +495,9 @@ def build_positive_prompt(text: str, params: dict[str, Any]) -> str:
     parts = [
         f"Primary scene command: {base}" if base else "",
         command_lock,
+        f"Story context: {story_context}" if story_context else "",
+        f"Scene purpose: {scene_goal}" if scene_goal else "",
+        f"Continuity: {continuity}" if continuity else "",
         f"Additional scene detail: {scene_detail}" if scene_detail else "",
         f"Aesthetic: {aesthetic}",
         f"Camera and lens: {camera}" + (f", {lens}" if lens else ""),
@@ -472,6 +505,9 @@ def build_positive_prompt(text: str, params: dict[str, Any]) -> str:
         f"Motion: {motion}",
         f"Composition: {composition}",
         f"Color grade: {color}",
+        f"Audio and ambience: {audio}" if audio else "",
+        f"Photorealism guardrails: {realism}",
+        f"Physical accuracy: {physical_accuracy}",
         f"Temporal quality: {temporal}",
         f"Technical quality: {technical}",
         suffix,
@@ -485,7 +521,9 @@ def build_negative_prompt(params: dict[str, Any]) -> str:
     advanced = (
         "bad cinematography, weak composition, inconsistent lighting, unstable camera, motion jitter, temporal flicker, "
         "object morphing, duplicated objects, melted textures, smeared details, fake CGI look, flat lighting, overexposure, "
-        "underexposure, low dynamic range, muddy colors, oversaturated colors, low resolution, compression artifacts"
+        "underexposure, low dynamic range, muddy colors, oversaturated colors, low resolution, compression artifacts, "
+        "heavy orange tint, yellow color cast, blown-out highlights, floating colored particles, random specks, dirty cup, "
+        "stained ceramic, warped handle, extra handles, liquid eruption, steam blob, smoke plume covering subject"
     )
     return ", ".join(unique_nonempty_parts([base, advanced, extra]))
 
