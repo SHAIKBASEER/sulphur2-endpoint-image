@@ -16,6 +16,8 @@ bucket writes and cannot run Sulphur/LTXVideo directly.
 3. Starts ComfyUI with the Lightricks `ComfyUI-LTXVideo` custom nodes.
 4. Queues the workflow through the ComfyUI HTTP API.
 5. Uploads the generated output file back to your bucket.
+6. Adds a `VHS_VideoCombine` MP4 output fallback when native `SaveVideo`
+   completes without a ComfyUI history output.
 
 ## Required Bucket Files
 
@@ -104,6 +106,8 @@ WORKFLOW_KEY=workflows/ltx23_t2v_api.json
 STARTUP_DOWNLOADS=1
 MODEL_DOWNLOAD_TIMEOUT=7200
 GENERATION_TIMEOUT=2400
+DEFAULT_FPS=24
+OUTPUT_VIDEO_FORMAT=video/h264-mp4
 ```
 
 Secret env:
@@ -128,6 +132,29 @@ Invoke-RestMethod `
   } `
   -ContentType "application/json" `
   -Body $body
+```
+
+Before running a long generation, verify the converted workflow contains the
+fallback video output:
+
+```powershell
+Invoke-RestMethod `
+  -Uri "https://YOUR-ENDPOINT.us-east-1.aws.endpoints.huggingface.cloud/debug/workflow" `
+  -Method Post `
+  -Headers @{
+    Authorization = "Bearer $env:HF_TOKEN"
+    Accept = "application/json"
+  } `
+  -ContentType "application/json" `
+  -Body $body
+```
+
+Expected debug field:
+
+```json
+{
+  "has_vhs_output": true
+}
 ```
 
 Expected response:

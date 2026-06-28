@@ -45,6 +45,9 @@ RUN mkdir -p ${COMFYUI_DIR}/custom_nodes \
          python3 -m pip install --no-cache-dir -r ${COMFYUI_DIR}/custom_nodes/ComfyUI-LTXVideo/requirements.txt; \
        fi
 
+RUN git clone --depth 1 https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite.git ${COMFYUI_DIR}/custom_nodes/ComfyUI-VideoHelperSuite \
+    && python3 -m pip install --no-cache-dir -r ${COMFYUI_DIR}/custom_nodes/ComfyUI-VideoHelperSuite/requirements.txt
+
 # Isolated latest HF CLI for Bucket cp/upload commands. This avoids conflicts with
 # model libraries that may need older huggingface_hub APIs.
 RUN python3 -m venv /opt/hfcli \

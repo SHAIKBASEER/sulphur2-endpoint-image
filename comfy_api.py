@@ -130,6 +130,10 @@ def convert_ui_workflow_to_api(workflow: dict[str, Any]) -> dict[str, Any]:
             continue
         if class_type in {"Reroute", "Note"}:
             continue
+        if class_type == "SaveVideo" and "VHS_VideoCombine" in object_info:
+            # Native SaveVideo has completed without history outputs on some
+            # ComfyUI builds. A VHS output node is injected after conversion.
+            continue
         if class_type not in object_info:
             continue
 
@@ -156,9 +160,136 @@ def convert_ui_workflow_to_api(workflow: dict[str, Any]) -> dict[str, Any]:
             "inputs": inputs,
         }
 
+    if "VHS_VideoCombine" in object_info:
+        _add_vhs_video_output_node(prompt, workflow, object_info, raw_link_map, nodes_by_id, resolve_link_origin)
+
     if not prompt:
         raise ComfyError("Converted UI workflow is empty")
     return prompt
+
+
+def _add_vhs_video_output_node(
+    prompt: dict[str, Any],
+    workflow: dict[str, Any],
+    object_info: dict[str, Any],
+    raw_link_map: dict[int, dict[str, Any]],
+    nodes_by_id: dict[str, dict[str, Any]],
+    resolve_link_origin,
+) -> None:
+    if any(node.get("class_type") == "VHS_VideoCombine" for node in prompt.values()):
+        return
+
+    images_ref, filename_prefix = _find_video_images_reference(
+        workflow,
+        raw_link_map,
+        nodes_by_id,
+        prompt,
+        resolve_link_origin,
+    )
+    if images_ref is None:
+        return
+
+    node_id = _next_prompt_node_id(prompt)
+    input_names = set(object_input_names(object_info, "VHS_VideoCombine"))
+    inputs: dict[str, Any] = {"images": images_ref}
+    defaults = {
+        "frame_rate": int(os.environ.get("DEFAULT_FPS", "24")),
+        "loop_count": 0,
+        "filename_prefix": filename_prefix or "video/LTX_2.3_t2v",
+        "format": os.environ.get("OUTPUT_VIDEO_FORMAT", "video/h264-mp4"),
+        "pingpong": False,
+        "save_output": True,
+    }
+    for name, value in defaults.items():
+        if name in input_names:
+            inputs[name] = value
+
+    prompt[node_id] = {
+        "class_type": "VHS_VideoCombine",
+        "inputs": inputs,
+    }
+
+
+def _find_video_images_reference(
+    workflow: dict[str, Any],
+    raw_link_map: dict[int, dict[str, Any]],
+    nodes_by_id: dict[str, dict[str, Any]],
+    prompt: dict[str, Any],
+    resolve_link_origin,
+) -> tuple[list[Any] | None, str | None]:
+    for node in workflow.get("nodes") or []:
+        if node.get("type") != "SaveVideo":
+            continue
+        prefix = _filename_prefix_from_widgets(node)
+        for node_input in node.get("inputs") or []:
+            if node_input.get("name") != "video" or node_input.get("link") is None:
+                continue
+            images_ref = _create_video_images_from_video_link(
+                int(node_input["link"]),
+                raw_link_map,
+                nodes_by_id,
+                prompt,
+                resolve_link_origin,
+            )
+            if images_ref is not None:
+                return images_ref, prefix
+
+    for node_id, node in prompt.items():
+        if node.get("class_type") == "CreateVideo":
+            inputs = node.get("inputs", {})
+            images_ref = inputs.get("images")
+            if isinstance(images_ref, list):
+                return images_ref, "video/LTX_2.3_t2v"
+
+    return None, None
+
+
+def _create_video_images_from_video_link(
+    link_id: int,
+    raw_link_map: dict[int, dict[str, Any]],
+    nodes_by_id: dict[str, dict[str, Any]],
+    prompt: dict[str, Any],
+    resolve_link_origin,
+) -> list[Any] | None:
+    link = raw_link_map.get(link_id)
+    if not link:
+        return None
+
+    create_video_id = str(link.get("origin_id"))
+    create_video_prompt_node = prompt.get(create_video_id, {})
+    if create_video_prompt_node.get("class_type") == "CreateVideo":
+        images_ref = create_video_prompt_node.get("inputs", {}).get("images")
+        if isinstance(images_ref, list):
+            return images_ref
+
+    create_video_ui_node = nodes_by_id.get(create_video_id, {})
+    if create_video_ui_node.get("type") != "CreateVideo":
+        return None
+
+    for create_input in create_video_ui_node.get("inputs") or []:
+        if create_input.get("name") == "images" and create_input.get("link") is not None:
+            return resolve_link_origin(int(create_input["link"]))
+    return None
+
+
+def _filename_prefix_from_widgets(node: dict[str, Any]) -> str | None:
+    widgets = node.get("widgets_values")
+    if isinstance(widgets, dict):
+        value = widgets.get("filename_prefix") or widgets.get("filename")
+        return str(value) if value else None
+    if isinstance(widgets, list) and widgets:
+        return str(widgets[0])
+    return None
+
+
+def _next_prompt_node_id(prompt: dict[str, Any]) -> str:
+    numeric_ids = []
+    for node_id in prompt:
+        try:
+            numeric_ids.append(int(node_id))
+        except ValueError:
+            continue
+    return str((max(numeric_ids) if numeric_ids else 0) + 1000)
 
 
 def get_object_info() -> dict[str, Any]:
@@ -281,7 +412,7 @@ def queue_prompt(prompt: dict[str, Any], client_id: str) -> str:
     return prompt_id
 
 
-PREFERRED_OUTPUT_EXT = {".mp4", ".webm", ".gif", ".png", ".jpg", ".jpeg", ".webp"}
+PREFERRED_OUTPUT_EXT = {".mp4", ".webm", ".gif", ".png", ".jpg", ".jpeg", ".webp", ".mov", ".mkv", ".avi"}
 
 
 def wait_for_result(prompt_id: str, before: set[Path], timeout_seconds: int = 1800) -> Path:
@@ -334,6 +465,15 @@ def current_outputs() -> set[Path]:
     if not OUTPUT_DIR.exists():
         return set()
     return {p for p in OUTPUT_DIR.rglob("*") if p.is_file()}
+
+
+def recent_output_files(limit: int = 20) -> list[str]:
+    files: list[Path] = []
+    for root in (OUTPUT_DIR, COMFYUI_DIR / "temp"):
+        if root.exists():
+            files.extend(p for p in root.rglob("*") if p.is_file() and p.suffix.lower() in PREFERRED_OUTPUT_EXT)
+    files = sorted(files, key=lambda p: p.stat().st_mtime, reverse=True)
+    return [str(p) for p in files[:limit]]
 
 
 def _new_output_files(before: set[Path], since_time: float | None = None) -> list[Path]:

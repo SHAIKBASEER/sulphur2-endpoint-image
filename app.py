@@ -17,6 +17,7 @@ from comfy_api import (
     load_workflow,
     patch_workflow,
     queue_prompt,
+    recent_output_files,
     start_comfy,
     wait_for_comfy,
     wait_for_result,
@@ -109,6 +110,7 @@ def status() -> dict[str, Any]:
         "upscaler_exists": UPSCALER_PATH.exists(),
         "comfy_process_running": _comfy_process is not None and _comfy_process.poll() is None,
         "comfy_process_returncode": None if _comfy_process is None else _comfy_process.poll(),
+        "recent_outputs": recent_output_files(),
         "comfy_log_tail": comfy_log_tail(),
     }
 
@@ -116,6 +118,37 @@ def status() -> dict[str, Any]:
 @app.post("/")
 def generate_root(request: GenerateRequest) -> dict[str, Any]:
     return generate(request)
+
+
+@app.post("/debug/workflow")
+def debug_workflow(request: GenerateRequest) -> dict[str, Any]:
+    try:
+        prepare_runtime()
+        workflow = patch_workflow(load_workflow(WORKFLOW_PATH), request.inputs, request.parameters)
+        class_counts: dict[str, int] = {}
+        output_like_nodes = []
+        for node_id, node in workflow.items():
+            class_type = str(node.get("class_type", ""))
+            class_counts[class_type] = class_counts.get(class_type, 0) + 1
+            if class_type in {"VHS_VideoCombine", "SaveVideo", "SaveImage", "PreviewImage"}:
+                output_like_nodes.append(
+                    {
+                        "node_id": node_id,
+                        "class_type": class_type,
+                        "inputs": node.get("inputs", {}),
+                    }
+                )
+        return {
+            "status": "ok",
+            "node_count": len(workflow),
+            "has_vhs_output": any(node["class_type"] == "VHS_VideoCombine" for node in output_like_nodes),
+            "output_like_nodes": output_like_nodes,
+            "class_counts": class_counts,
+        }
+    except (BucketError, ComfyError) as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=f"Unexpected failure: {exc}") from exc
 
 
 @app.post("/generate")
