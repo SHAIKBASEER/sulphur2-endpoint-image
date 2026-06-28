@@ -10,8 +10,8 @@ ENV HF_HOME=/data/hf-cache
 ENV HF_HUB_ENABLE_HF_TRANSFER=1
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    python3 \
     build-essential \
+    python3 \
     python3-dev \
     python3-venv \
     python3-pip \

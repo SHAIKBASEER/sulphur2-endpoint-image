@@ -8,7 +8,7 @@ from typing import Any
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
-from bucket_cli import BucketError, cp_from_bucket, cp_to_bucket
+from bucket_cli import BucketError, cp_from_bucket, cp_to_bucket, download_from_repo
 from comfy_api import (
     COMFYUI_DIR,
     ComfyError,
@@ -33,6 +33,19 @@ LORA_KEY = os.environ.get(
 )
 LORA_NAME = os.environ.get("LORA_NAME", Path(LORA_KEY).name)
 WORKFLOW_KEY = os.environ.get("WORKFLOW_KEY", "workflows/ltx23_t2v_api.json")
+TEXT_ENCODER_REPO = os.environ.get(
+    "TEXT_ENCODER_REPO", "google/gemma-3-12b-it-qat-q4_0-unquantized"
+)
+TEXT_ENCODER_KEY = os.environ.get("TEXT_ENCODER_KEY", "")
+TEXT_ENCODER_NAME = os.environ.get(
+    "TEXT_ENCODER_NAME",
+    "gemma-3-12b-it-qat-q4_0-unquantized/model-00001-of-00005.safetensors",
+)
+UPSCALER_REPO = os.environ.get("UPSCALER_REPO", "Lightricks/LTX-2.3")
+UPSCALER_KEY = os.environ.get(
+    "UPSCALER_KEY", "ltx-2.3-spatial-upscaler-x2-1.0.safetensors"
+)
+UPSCALER_NAME = os.environ.get("UPSCALER_NAME", Path(UPSCALER_KEY).name)
 MODEL_DOWNLOAD_TIMEOUT = int(os.environ.get("MODEL_DOWNLOAD_TIMEOUT", "7200"))
 GENERATION_TIMEOUT = int(os.environ.get("GENERATION_TIMEOUT", "2400"))
 STARTUP_DOWNLOADS = os.environ.get("STARTUP_DOWNLOADS", "1") == "1"
@@ -41,6 +54,9 @@ DATA_DIR = Path(os.environ.get("WORKDIR", "/data"))
 WORKFLOW_PATH = DATA_DIR / "workflows" / Path(WORKFLOW_KEY).name
 CHECKPOINT_PATH = COMFYUI_DIR / "models" / "checkpoints" / CHECKPOINT_NAME
 LORA_PATH = COMFYUI_DIR / "models" / "loras" / LORA_NAME
+TEXT_ENCODER_DIR = COMFYUI_DIR / "models" / "text_encoders"
+TEXT_ENCODER_PATH = TEXT_ENCODER_DIR / TEXT_ENCODER_NAME
+UPSCALER_PATH = COMFYUI_DIR / "models" / "latent_upscale_models" / UPSCALER_NAME
 
 
 class GenerateRequest(BaseModel):
@@ -84,9 +100,13 @@ def status() -> dict[str, Any]:
         "checkpoint_path": str(CHECKPOINT_PATH),
         "lora_path": str(LORA_PATH),
         "workflow_path": str(WORKFLOW_PATH),
+        "text_encoder_path": str(TEXT_ENCODER_PATH),
+        "upscaler_path": str(UPSCALER_PATH),
         "workflow_exists": WORKFLOW_PATH.exists(),
         "checkpoint_exists": CHECKPOINT_PATH.exists(),
         "lora_exists": LORA_PATH.exists(),
+        "text_encoder_exists": TEXT_ENCODER_PATH.exists(),
+        "upscaler_exists": UPSCALER_PATH.exists(),
         "comfy_process_running": _comfy_process is not None and _comfy_process.poll() is None,
         "comfy_process_returncode": None if _comfy_process is None else _comfy_process.poll(),
         "comfy_log_tail": comfy_log_tail(),
@@ -143,3 +163,14 @@ def download_assets() -> None:
         cp_from_bucket(BUCKET_ID, LORA_KEY, LORA_PATH, timeout=MODEL_DOWNLOAD_TIMEOUT)
     if not WORKFLOW_PATH.exists():
         cp_from_bucket(BUCKET_ID, WORKFLOW_KEY, WORKFLOW_PATH, timeout=300)
+    if TEXT_ENCODER_REPO and not TEXT_ENCODER_PATH.exists():
+        filename = TEXT_ENCODER_KEY or None
+        target_dir = TEXT_ENCODER_DIR / Path(TEXT_ENCODER_NAME).parts[0]
+        download_from_repo(TEXT_ENCODER_REPO, target_dir, filename=filename, timeout=MODEL_DOWNLOAD_TIMEOUT)
+    if UPSCALER_REPO and not UPSCALER_PATH.exists():
+        download_from_repo(
+            UPSCALER_REPO,
+            UPSCALER_PATH.parent,
+            filename=UPSCALER_KEY,
+            timeout=MODEL_DOWNLOAD_TIMEOUT,
+        )

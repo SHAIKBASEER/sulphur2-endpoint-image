@@ -48,3 +48,18 @@ def cp_to_bucket(local_path: Path, bucket_id: str, key: str, timeout: int | None
     remote_uri = bucket_uri(bucket_id, key)
     run_hf(["buckets", "cp", str(local_path), remote_uri], timeout=timeout)
     return remote_uri
+
+
+def download_from_repo(
+    repo_id: str,
+    local_dir: Path,
+    filename: str | None = None,
+    timeout: int | None = None,
+) -> Path:
+    local_dir.mkdir(parents=True, exist_ok=True)
+    args = ["download", repo_id]
+    if filename:
+        args.append(filename)
+    args.extend(["--local-dir", str(local_dir)])
+    run_hf(args, timeout=timeout)
+    return local_dir

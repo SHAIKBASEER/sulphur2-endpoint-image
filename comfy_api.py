@@ -111,13 +111,14 @@ def convert_ui_workflow_to_api(workflow: dict[str, Any]) -> dict[str, Any]:
         origin_id = str(link["origin_id"])
         origin_slot = int(link["origin_slot"])
         origin_node = nodes_by_id.get(origin_id, {})
+        origin_type = origin_node.get("type")
 
-        if origin_node.get("type") == "Reroute":
+        if origin_type == "Reroute" or origin_type not in object_info:
             for node_input in origin_node.get("inputs") or []:
                 upstream_link = node_input.get("link")
                 if upstream_link is not None:
                     return resolve_link_origin(int(upstream_link), seen)
-            raise ComfyError(f"Reroute node {origin_id} has no upstream input")
+            raise ComfyError(f"Skipped node {origin_id} ({origin_type}) has no upstream input")
 
         return [origin_id, origin_slot]
 
@@ -183,6 +184,8 @@ def patch_workflow(prompt: dict[str, Any], text: str, params: dict[str, Any]) ->
     positive_node = os.environ.get("PROMPT_NODE_ID", "").strip()
     checkpoint_name = os.environ.get("CHECKPOINT_NAME", "").strip()
     lora_name = os.environ.get("LORA_NAME", "").strip()
+    text_encoder_name = os.environ.get("TEXT_ENCODER_NAME", "").strip()
+    upscaler_name = os.environ.get("UPSCALER_NAME", "").strip()
 
     if positive_node and positive_node in prompt:
         _patch_node_inputs(prompt[positive_node], text, params, force_text=True)
@@ -198,6 +201,15 @@ def patch_workflow(prompt: dict[str, Any], text: str, params: dict[str, Any]) ->
         for key in ("ckpt_name", "checkpoint_name"):
             if checkpoint_name and key in inputs and isinstance(inputs[key], str):
                 inputs[key] = checkpoint_name
+        for key in ("ltxv_path", "model_path"):
+            if checkpoint_name and key in inputs and isinstance(inputs[key], str):
+                inputs[key] = checkpoint_name
+        for key in ("text_encoder", "gemma_path"):
+            if text_encoder_name and key in inputs and isinstance(inputs[key], str):
+                inputs[key] = text_encoder_name
+        if upscaler_name and node.get("class_type") == "LatentUpscaleModelLoader":
+            if "model_name" in inputs and isinstance(inputs["model_name"], str):
+                inputs["model_name"] = upscaler_name
         for key in ("lora_name", "loras"):
             if lora_name and key in inputs and isinstance(inputs[key], str):
                 inputs[key] = lora_name
