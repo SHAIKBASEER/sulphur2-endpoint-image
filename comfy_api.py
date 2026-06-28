@@ -139,17 +139,24 @@ def convert_ui_workflow_to_api(workflow: dict[str, Any]) -> dict[str, Any]:
 
         inputs: dict[str, Any] = {}
         linked_names: set[str] = set()
+        linked_widget_names: set[str] = set()
         for node_input in node.get("inputs") or []:
             link_id = node_input.get("link")
             name = node_input.get("name")
             if link_id is not None and name and int(link_id) in raw_link_map:
                 inputs[name] = resolve_link_origin(int(link_id))
                 linked_names.add(name)
+                if isinstance(node_input.get("widget"), dict):
+                    widget_name = node_input["widget"].get("name")
+                    if widget_name:
+                        linked_widget_names.add(str(widget_name))
 
         widget_values = list(node.get("widgets_values") or [])
         widget_index = 0
         for input_name in object_input_names(object_info, class_type):
             if input_name in linked_names or input_name in inputs:
+                if input_name in linked_widget_names and widget_index < len(widget_values):
+                    widget_index += 1
                 continue
             if widget_index < len(widget_values):
                 inputs[input_name] = widget_values[widget_index]

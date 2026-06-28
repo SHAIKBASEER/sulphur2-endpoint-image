@@ -131,6 +131,7 @@ def debug_workflow(request: GenerateRequest) -> dict[str, Any]:
         workflow = patch_workflow(load_workflow(WORKFLOW_PATH), request.inputs, request.parameters)
         class_counts: dict[str, int] = {}
         output_like_nodes = []
+        latent_debug_nodes = []
         for node_id, node in workflow.items():
             class_type = str(node.get("class_type", ""))
             class_counts[class_type] = class_counts.get(class_type, 0) + 1
@@ -142,11 +143,20 @@ def debug_workflow(request: GenerateRequest) -> dict[str, Any]:
                         "inputs": node.get("inputs", {}),
                     }
                 )
+            if class_type in {"EmptyLTXVLatentVideo", "LTXVEmptyLatentAudio"}:
+                latent_debug_nodes.append(
+                    {
+                        "node_id": node_id,
+                        "class_type": class_type,
+                        "inputs": node.get("inputs", {}),
+                    }
+                )
         return {
             "status": "ok",
             "node_count": len(workflow),
             "has_vhs_output": any(node["class_type"] == "VHS_VideoCombine" for node in output_like_nodes),
             "output_like_nodes": output_like_nodes,
+            "latent_debug_nodes": latent_debug_nodes,
             "class_counts": class_counts,
         }
     except (BucketError, ComfyError) as exc:
