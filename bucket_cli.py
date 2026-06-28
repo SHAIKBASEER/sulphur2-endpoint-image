@@ -63,3 +63,26 @@ def download_from_repo(
     args.extend(["--local-dir", str(local_dir)])
     run_hf(args, timeout=timeout)
     return local_dir
+
+
+def download_file_from_repo(
+    repo_id: str,
+    filename: str,
+    local_path: Path,
+    timeout: int | None = None,
+) -> Path:
+    temp_dir = local_path.parent / ".hf-downloads" / local_path.stem
+    temp_dir.mkdir(parents=True, exist_ok=True)
+    run_hf(["download", repo_id, filename, "--local-dir", str(temp_dir)], timeout=timeout)
+
+    downloaded = temp_dir / filename
+    if not downloaded.exists():
+        matches = list(temp_dir.rglob(Path(filename).name))
+        if not matches:
+            raise BucketError(f"Downloaded file was not found for {repo_id}/{filename}")
+        downloaded = matches[0]
+
+    local_path.parent.mkdir(parents=True, exist_ok=True)
+    if downloaded.resolve() != local_path.resolve():
+        local_path.write_bytes(downloaded.read_bytes())
+    return local_path

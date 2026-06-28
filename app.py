@@ -8,7 +8,7 @@ from typing import Any
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
-from bucket_cli import BucketError, cp_from_bucket, cp_to_bucket, download_from_repo
+from bucket_cli import BucketError, cp_from_bucket, cp_to_bucket, download_file_from_repo, download_from_repo
 from comfy_api import (
     COMFYUI_DIR,
     ComfyError,
@@ -35,12 +35,15 @@ LORA_KEY = os.environ.get(
 LORA_NAME = os.environ.get("LORA_NAME", Path(LORA_KEY).name)
 WORKFLOW_KEY = os.environ.get("WORKFLOW_KEY", "workflows/ltx23_t2v_api.json")
 TEXT_ENCODER_REPO = os.environ.get(
-    "TEXT_ENCODER_REPO", "google/gemma-3-12b-it-qat-q4_0-unquantized"
+    "TEXT_ENCODER_REPO", "Comfy-Org/ltx-2"
 )
-TEXT_ENCODER_KEY = os.environ.get("TEXT_ENCODER_KEY", "")
+TEXT_ENCODER_KEY = os.environ.get(
+    "TEXT_ENCODER_KEY",
+    "split_files/text_encoders/gemma_3_12B_it_fp4_mixed.safetensors",
+)
 TEXT_ENCODER_NAME = os.environ.get(
     "TEXT_ENCODER_NAME",
-    "gemma-3-12b-it-qat-q4_0-unquantized/model-00001-of-00005.safetensors",
+    "gemma_3_12B_it_fp4_mixed.safetensors",
 )
 UPSCALER_REPO = os.environ.get("UPSCALER_REPO", "Lightricks/LTX-2.3")
 UPSCALER_KEY = os.environ.get(
@@ -107,6 +110,7 @@ def status() -> dict[str, Any]:
         "checkpoint_exists": CHECKPOINT_PATH.exists(),
         "lora_exists": LORA_PATH.exists(),
         "text_encoder_exists": TEXT_ENCODER_PATH.exists(),
+        "text_encoder_size_bytes": TEXT_ENCODER_PATH.stat().st_size if TEXT_ENCODER_PATH.exists() else 0,
         "upscaler_exists": UPSCALER_PATH.exists(),
         "comfy_process_running": _comfy_process is not None and _comfy_process.poll() is None,
         "comfy_process_returncode": None if _comfy_process is None else _comfy_process.poll(),
@@ -197,9 +201,16 @@ def download_assets() -> None:
     if not WORKFLOW_PATH.exists():
         cp_from_bucket(BUCKET_ID, WORKFLOW_KEY, WORKFLOW_PATH, timeout=300)
     if TEXT_ENCODER_REPO and not TEXT_ENCODER_PATH.exists():
-        filename = TEXT_ENCODER_KEY or None
-        target_dir = TEXT_ENCODER_DIR / Path(TEXT_ENCODER_NAME).parts[0]
-        download_from_repo(TEXT_ENCODER_REPO, target_dir, filename=filename, timeout=MODEL_DOWNLOAD_TIMEOUT)
+        if TEXT_ENCODER_KEY:
+            download_file_from_repo(
+                TEXT_ENCODER_REPO,
+                TEXT_ENCODER_KEY,
+                TEXT_ENCODER_PATH,
+                timeout=MODEL_DOWNLOAD_TIMEOUT,
+            )
+        else:
+            target_dir = TEXT_ENCODER_DIR / Path(TEXT_ENCODER_NAME).parts[0]
+            download_from_repo(TEXT_ENCODER_REPO, target_dir, filename=None, timeout=MODEL_DOWNLOAD_TIMEOUT)
     if UPSCALER_REPO and not UPSCALER_PATH.exists():
         download_from_repo(
             UPSCALER_REPO,
