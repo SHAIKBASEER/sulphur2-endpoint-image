@@ -8,7 +8,6 @@ ENV COMFYUI_PORT=8188
 ENV WORKDIR=/data
 ENV HF_HOME=/data/hf-cache
 ENV HF_HUB_ENABLE_HF_TRANSFER=1
-ENV PYTHONPATH=/app
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 \
