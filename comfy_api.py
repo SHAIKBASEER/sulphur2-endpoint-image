@@ -13,6 +13,7 @@ COMFYUI_DIR = Path(os.environ.get("COMFYUI_DIR", "/opt/ComfyUI"))
 COMFYUI_PORT = int(os.environ.get("COMFYUI_PORT", "8188"))
 COMFYUI_URL = f"http://127.0.0.1:{COMFYUI_PORT}"
 OUTPUT_DIR = Path(os.environ.get("COMFYUI_OUTPUT_DIR", "/data/outputs"))
+COMFY_LOG_PATH = Path(os.environ.get("COMFY_LOG_PATH", "/data/comfyui.log"))
 
 
 class ComfyError(RuntimeError):
@@ -21,6 +22,10 @@ class ComfyError(RuntimeError):
 
 def start_comfy() -> subprocess.Popen:
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    COMFY_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    log_file = COMFY_LOG_PATH.open("a", encoding="utf-8")
+    log_file.write("\n\n--- starting ComfyUI ---\n")
+    log_file.flush()
     command = [
         "python3",
         "main.py",
@@ -35,7 +40,7 @@ def start_comfy() -> subprocess.Popen:
     return subprocess.Popen(
         command,
         cwd=str(COMFYUI_DIR),
-        stdout=subprocess.PIPE,
+        stdout=log_file,
         stderr=subprocess.STDOUT,
         text=True,
     )
@@ -54,6 +59,13 @@ def wait_for_comfy(timeout_seconds: int = 300) -> None:
             last_error = str(exc)
         time.sleep(2)
     raise ComfyError(f"ComfyUI did not become ready: {last_error}")
+
+
+def comfy_log_tail(max_chars: int = 8000) -> str:
+    if not COMFY_LOG_PATH.exists():
+        return ""
+    data = COMFY_LOG_PATH.read_text(encoding="utf-8", errors="replace")
+    return data[-max_chars:]
 
 
 def load_workflow(path: Path) -> dict[str, Any]:
